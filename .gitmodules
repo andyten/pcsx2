@@ -30,3 +30,6 @@
 [submodule "3rdparty/vulkan-headers"]
 	path = 3rdparty/vulkan-headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers.git
+[submodule "3rdparty/qt"]
+	path = 3rdparty/qt
+	url = https://github.com/stenzek/duckstation-ext-qt-minimal.git
