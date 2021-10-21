@@ -23,6 +23,8 @@
 #include "Frontend/D3D11HostDisplay.h"
 #endif
 
+#include "Frontend/VulkanHostDisplay.h"
+
 using namespace GSSettingsDialog;
 
 namespace
@@ -349,7 +351,7 @@ HacksTab::HacksTab(wxWindow* parent)
 	auto hw_prereq = [this]{ return m_is_hardware; };
 	auto* hacks_check_box = m_ui.addCheckBox(tab_box.inner, "Enable HW Hacks", "UserHacks", -1, hw_prereq);
 	auto hacks_prereq = [this, hacks_check_box]{ return m_is_hardware && hacks_check_box->GetValue(); };
-	auto gl_hacks_prereq = [this, hacks_check_box]{ return m_is_ogl_hw && hacks_check_box->GetValue(); };
+	auto gl_or_vk_hacks_prereq = [this, hacks_check_box]{ return (m_is_ogl_hw || m_is_vk_hw) && hacks_check_box->GetValue(); };
 	auto upscale_hacks_prereq = [this, hacks_check_box]{ return !m_is_native_res && hacks_check_box->GetValue(); };
 
 	PaddedBoxSizer<wxStaticBoxSizer> rend_hacks_box   (wxVERTICAL, this, "Renderer Hacks");
@@ -379,7 +381,7 @@ HacksTab::HacksTab(wxWindow* parent)
 
 	// Renderer Hacks:
 	m_ui.addComboBoxAndLabel(rend_hack_choice_grid, "Half Screen Fix:",     "UserHacks_Half_Bottom_Override", &theApp.m_gs_generic_list, IDC_HALF_SCREEN_TS, hacks_prereq);
-	m_ui.addComboBoxAndLabel(rend_hack_choice_grid, "Trilinear Filtering:", "UserHacks_TriFilter",            &theApp.m_gs_trifilter,    IDC_TRI_FILTER,     gl_hacks_prereq);
+	m_ui.addComboBoxAndLabel(rend_hack_choice_grid, "Trilinear Filtering:", "UserHacks_TriFilter",            &theApp.m_gs_trifilter,    IDC_TRI_FILTER,     gl_or_vk_hacks_prereq);
 
 	// Skipdraw Range
 	add_label(this, rend_hack_choice_grid, "Skipdraw Range:", IDC_SKIPDRAWHACK);
@@ -688,6 +690,9 @@ void Dialog::RendererChange()
 		list = D3D11HostDisplay::StaticGetAdapterAndModeList();
 		break;
 #endif
+	case GSRendererType::VK:
+		list = VulkanHostDisplay::StaticGetAdapterAndModeList(nullptr);
+		break;
 	default:
 		break;
 	}
@@ -763,11 +768,12 @@ void Dialog::Update()
 	else
 	{
 		// cross-tab dependencies yay
-		const bool is_hw = renderer == GSRendererType::OGL || renderer == GSRendererType::DX11;
+		const bool is_hw = renderer == GSRendererType::OGL || renderer == GSRendererType::DX11 || renderer == GSRendererType::VK;
 		const bool is_upscale = m_renderer_panel->m_internal_resolution->GetSelection() != 0;
 		m_hacks_panel->m_is_native_res = !is_hw || !is_upscale;
 		m_hacks_panel->m_is_hardware = is_hw;
 		m_hacks_panel->m_is_ogl_hw = renderer == GSRendererType::OGL;
+		m_hacks_panel->m_is_vk_hw = renderer == GSRendererType::VK;
 		m_renderer_panel->m_is_hardware = is_hw;
 		m_renderer_panel->m_is_native_res = !is_hw || !is_upscale;
 		m_debug_panel->m_is_ogl_hw = renderer == GSRendererType::OGL;

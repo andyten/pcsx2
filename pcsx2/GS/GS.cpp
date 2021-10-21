@@ -26,6 +26,7 @@
 #include "Renderers/Null/GSRendererNull.h"
 #include "Renderers/Null/GSDeviceNull.h"
 #include "Renderers/OpenGL/GSDeviceOGL.h"
+#include "Renderers/Vulkan/GSDeviceVK.h"
 #include "Renderers/HW/GSRendererNew.h"
 #include "GSLzma.h"
 
@@ -154,6 +155,9 @@ static HostDisplay::RenderAPI GetAPIForRenderer(GSRendererType renderer)
 #endif
 			return HostDisplay::RenderAPI::OpenGL;
 
+		case GSRendererType::VK:
+			return HostDisplay::RenderAPI::Vulkan;
+
 #ifdef _WIN32
 		case GSRendererType::DX11:
 		case GSRendererType::SW:
@@ -181,6 +185,10 @@ static bool DoGSOpen(GSRendererType renderer, u8* basemem)
 		case HostDisplay::RenderAPI::OpenGL:
 		case HostDisplay::RenderAPI::OpenGLES:
 			g_gs_device = std::make_unique<GSDeviceOGL>();
+			break;
+
+		case HostDisplay::RenderAPI::Vulkan:
+			g_gs_device = std::make_unique<GSDeviceVK>();
 			break;
 
 		default:
@@ -1123,6 +1131,7 @@ void GSApp::Init()
 	m_gs_renderers.push_back(GSSetting(static_cast<u32>(GSRendererType::DX11), "Direct3D 11", ""));
 #endif
 	m_gs_renderers.push_back(GSSetting(static_cast<u32>(GSRendererType::OGL), "OpenGL", ""));
+	m_gs_renderers.push_back(GSSetting(static_cast<u32>(GSRendererType::VK), "Vulkan", ""));
 	m_gs_renderers.push_back(GSSetting(static_cast<u32>(GSRendererType::SW), "Software", ""));
 
 	// The null renderer goes last, it has use for benchmarking purposes in a release build
