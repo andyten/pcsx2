@@ -398,4 +398,16 @@ namespace GLLoader
 
 		s_first_load = false;
 	}
+
+	bool UseShaderCache()
+	{
+		// Shader cache is currently disabled on Windows NVIDIA and AMD drivers as it is redundant.
+#ifdef _WIN32
+		if (vendor_id_nvidia || vendor_id_amd)
+			return false;
+#endif
+		
+		return true;
+	}
+
 } // namespace GLLoader
