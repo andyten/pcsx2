@@ -244,14 +244,14 @@ bool GSDeviceOGL::Create(const WindowInfo& wi)
 		return false;
 	}
 
-	if (GLLoader::UseShaderCache())
+	if (!theApp.GetConfigB("disable_shader_cache"))
 	{
 		if (!m_shader_cache.Open(false, StringUtil::wxStringToUTF8String(EmuFolders::Cache.ToString()), SHADER_VERSION))
 			Console.Warning("Shader cache failed to open.");
 	}
 	else
 	{
-		Console.WriteLn("Not using shader cache on this driver.");
+		Console.WriteLn("Not using shader cache.");
 	}
 
 	{
