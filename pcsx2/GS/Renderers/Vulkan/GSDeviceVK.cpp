@@ -244,6 +244,7 @@ bool GSDeviceVK::CheckFeatures()
 	m_features.image_load_store = features.fragmentStoresAndAtomics;
 	m_features.texture_barrier = true;
 	m_features.prefer_new_textures = true;
+	m_features.provoking_vertex_last = g_vulkan_context->GetOptionalExtensions().vk_ext_provoking_vertex;
 
 	if (!features.dualSrcBlend)
 	{
@@ -1217,6 +1218,10 @@ bool GSDeviceVK::CompileConvertPipelines()
 	gpb.SetNoBlendingState();
 	gpb.SetVertexShader(vs);
 
+	// we enable provoking vertex here anyway, in case it doesn't support multiple modes in the same pass
+	if (m_features.provoking_vertex_last)
+		gpb.SetProvokingVertex(VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT);
+
 	for (ShaderConvert i = ShaderConvert::COPY; static_cast<int>(i) < static_cast<int>(ShaderConvert::Count);
 		 i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
@@ -1440,6 +1445,10 @@ bool GSDeviceVK::CompileInterlacePipelines()
 	gpb.SetRenderPass(rp, 0);
 	gpb.SetVertexShader(vs);
 
+	// we enable provoking vertex here anyway, in case it doesn't support multiple modes in the same pass
+	if (m_features.provoking_vertex_last)
+		gpb.SetProvokingVertex(VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT);
+
 	for (int i = 0; i < static_cast<int>(m_interlace.size()); i++)
 	{
 		VkShaderModule ps = GetUtilityFragmentShader(*shader, StringUtil::StdStringFromFormat("ps_main%d", i).c_str());
@@ -1488,6 +1497,10 @@ bool GSDeviceVK::CompileMergePipelines()
 	gpb.SetNoDepthTestState();
 	gpb.SetRenderPass(rp, 0);
 	gpb.SetVertexShader(vs);
+
+	// we enable provoking vertex here anyway, in case it doesn't support multiple modes in the same pass
+	if (m_features.provoking_vertex_last)
+		gpb.SetProvokingVertex(VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT);
 
 	for (int i = 0; i < static_cast<int>(m_merge.size()); i++)
 	{
@@ -1817,6 +1830,9 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 		gpb.SetBlendAttachment(0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
 			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, p.cms.wrgba);
 	}
+
+	if (m_features.provoking_vertex_last)
+		gpb.SetProvokingVertex(VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT);
 
 	VkPipeline pipeline = gpb.Create(g_vulkan_context->GetDevice(), g_vulkan_shader_cache->GetPipelineCache(true));
 	if (pipeline)
