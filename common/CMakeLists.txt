@@ -133,9 +133,9 @@ target_sources(common PRIVATE
 	emitter/x86types.h
 )
 
-if(ENABLE_VULKAN)
+if(USE_VULKAN)
 	target_link_libraries(common PUBLIC
-		Vulkan-Headers
+		Vulkan-Headers glslang
 	)
 	target_sources(common PRIVATE
 		Vulkan/ShaderCache.cpp
@@ -219,7 +219,7 @@ if (USE_GCC AND CMAKE_INTERPROCEDURAL_OPTIMIZATION)
 	set_source_files_properties(FastJmp.cpp PROPERTIES COMPILE_FLAGS -fno-lto)
 endif()
 
-target_link_libraries(common PRIVATE ${LIBC_LIBRARIES} PUBLIC wxWidgets::all glad glslang)
+target_link_libraries(common PRIVATE ${LIBC_LIBRARIES} PUBLIC wxWidgets::all glad)
 target_compile_features(common PUBLIC cxx_std_17)
 target_include_directories(common PUBLIC ../3rdparty/include ../)
 target_compile_definitions(common PUBLIC "${PCSX2_DEFS}")

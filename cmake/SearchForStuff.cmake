@@ -244,11 +244,11 @@ else()
 endif()
 
 add_subdirectory(3rdparty/glad EXCLUDE_FROM_ALL)
-add_subdirectory(3rdparty/glslang EXCLUDE_FROM_ALL)
 add_subdirectory(3rdparty/simpleini EXCLUDE_FROM_ALL)
 add_subdirectory(3rdparty/imgui EXCLUDE_FROM_ALL)
 
 if(USE_VULKAN)
+	add_subdirectory(3rdparty/glslang EXCLUDE_FROM_ALL)
 	add_subdirectory(3rdparty/vulkan-headers EXCLUDE_FROM_ALL)
 endif()
 

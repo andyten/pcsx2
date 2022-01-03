@@ -23,7 +23,9 @@
 #include "Frontend/D3D11HostDisplay.h"
 #endif
 
+#ifdef ENABLE_VULKAN
 #include "Frontend/VulkanHostDisplay.h"
+#endif
 
 using namespace GSSettingsDialog;
 
@@ -691,9 +693,11 @@ void Dialog::RendererChange()
 		list = D3D11HostDisplay::StaticGetAdapterAndModeList();
 		break;
 #endif
+#ifdef ENABLE_VULKAN
 	case GSRendererType::VK:
 		list = VulkanHostDisplay::StaticGetAdapterAndModeList(nullptr);
 		break;
+#endif
 	default:
 		break;
 	}
