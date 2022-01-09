@@ -2539,6 +2539,14 @@ __forceinline void GSState::VertexKick(u32 skip)
 	{
 		m_mem.m_clut.Invalidate(m_context->FRAME.Block());
 
+		// internal frame rate detection based on sprite blits to the display framebuffer
+		if constexpr (prim == GS_SPRITE)
+		{
+			const u32 fbp = m_context->FRAME.FBP;
+			if (m_regs->DISP[0].DISPFB.FBP == fbp || m_regs->DISP[1].DISPFB.FBP == fbp)
+				g_perfmon.AddDisplayFramebufferSpriteBlit();
+		}
+
 		if (auto_flush && PRIM->TME && (m_context->FRAME.Block() == m_context->TEX0.TBP0))
 			FlushPrim();
 	}
