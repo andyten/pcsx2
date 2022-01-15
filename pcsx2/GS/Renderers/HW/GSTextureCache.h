@@ -42,6 +42,7 @@ public:
 		u8* m_temp;
 		bool m_32_bits_fmt; // Allow to detect the casting of 32 bits as 16 bits texture
 		bool m_shared_texture;
+		bool m_cached_texture;
 		u32 m_end_block; // Hint of the surface area.
 
 	public:
@@ -145,6 +146,7 @@ public:
 
 		void Update(const GSVector4i& rect, int layer = 0);
 		void UpdateLayer(const GIFRegTEX0& TEX0, const GSVector4i& rect, int layer = 0);
+		void PreloadLevel(int level, HashType hash);
 
 		bool ClutMatch(PaletteKey palette_key);
 	};
@@ -195,6 +197,8 @@ public:
 		u32 m_pages[16]; // bitmap of all pages
 		bool m_used;
 
+		std::map<std::pair<u64, u64>, Source*> m_cache;
+
 		SourceMap()
 			: m_used(false)
 		{
@@ -205,6 +209,7 @@ public:
 		void RemoveAll();
 		void RemovePartial();
 		void RemoveAt(Source* s);
+		void RemoveAtAndCache(Source* s);
 	};
 
 	struct TexInsideRtCacheEntry

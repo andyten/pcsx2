@@ -27,6 +27,94 @@
 bool GSTextureCache::m_disable_partial_invalidation = false;
 bool GSTextureCache::m_wrap_gs_mem = false;
 
+
+using BlockHashState = XXH3_state_t;
+
+__fi static void BlockHashReset(BlockHashState& st)
+{
+	XXH3_64bits_reset(&st);
+}
+
+__fi static void BlockHashAccumulate(BlockHashState& st, const u8* bp)
+{
+	XXH3_64bits_update(&st, bp, BLOCK_SIZE);
+}
+
+__fi static void BlockHashAccumulate(BlockHashState& st, const u8* bp, u32 size)
+{
+	XXH3_64bits_update(&st, bp, size);
+}
+
+__fi static GSTextureCache::Source::HashType FinishBlockHash(BlockHashState& st)
+{
+	return XXH3_64bits_digest(&st);
+}
+
+static GSTextureCache::Source::HashType HashTexture(GSRenderer* renderer, u8* buff, const GIFRegTEX0& TEX0, const GIFRegTEXA& TEXA)
+{
+	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[TEX0.PSM];
+	const GSVector2i& bs = psm.bs;
+	const int tw = 1 << TEX0.TW;
+	const int th = 1 << TEX0.TH;
+
+	// From GSLocalMemory foreachBlock(), used for reading textures.
+	// We want to hash the exact same blocks here.
+	const GSVector4i rect(0, 0, tw, th);
+	const GSVector4i block_rect(rect.ralign<Align_Outside>(bs));
+	GSLocalMemory& mem = renderer->m_mem;
+	GSOffset off = mem.GetOffset(TEX0.TBP0, TEX0.TBW, TEX0.PSM);
+
+	// For textures which are smaller than the block size, we expand and then hash.
+	// This is because otherwise we get the padding bytes, which can be random junk.
+	GSTextureCache::Source::HashType hash;
+	BlockHashState hash_st;
+	if (tw < bs.x || th < bs.y)
+	{
+		// Expand texture/apply palette.
+		u32 pitch = static_cast<u32>(block_rect.w);
+		u32 row_size = static_cast<u32>(tw);
+		GSLocalMemory::readTexture rtx = psm.rtxP;
+
+		// Use temp buffer for expanding, since we may not need to update.
+		(renderer->m_mem.*rtx)(off, block_rect, buff, pitch, TEXA);
+
+		// Hash the expanded texture.
+		u8* ptr = buff;
+		BlockHashReset(hash_st);
+		if (pitch == row_size)
+		{
+			BlockHashAccumulate(hash_st, ptr, pitch * static_cast<u32>(th));
+		}
+		else
+		{
+			for (int y = 0; y < th; y++, ptr += pitch)
+				BlockHashAccumulate(hash_st, ptr, row_size);
+		}
+		hash = FinishBlockHash(hash_st);
+	}
+	else
+	{
+		BlockHashReset(hash_st);
+
+		GSOffset::BNHelper bn = off.bnMulti(block_rect.left, block_rect.top);
+		const int right = block_rect.right >> off.blockShiftX();
+		const int bottom = block_rect.bottom >> off.blockShiftY();
+		const int xAdd = (1 << off.blockShiftX()) * (psm.bpp / 8);
+
+		for (; bn.blkY() < bottom; bn.nextBlockY())
+		{
+			for (int x = 0; bn.blkX() < right; bn.nextBlockX(), x += xAdd)
+			{
+				BlockHashAccumulate(hash_st, mem.BlockPtr(bn.value()));
+			}
+		}
+
+		hash = FinishBlockHash(hash_st);
+	}
+
+	return hash;
+}
+
 GSTextureCache::GSTextureCache(GSRenderer* r)
 	: m_renderer(r)
 	, m_palette_map(r)
@@ -260,6 +348,24 @@ GSTextureCache::Source* GSTextureCache::LookupSource(const GIFRegTEX0& TEX0, con
 		break;
 	}
 
+	Source::HashType hash;
+	bool hash_computed = false;
+	if (src == NULL && CanPreloadTextureSize(TEX0.TW, TEX0.TH))
+	{
+		// try the cache
+		hash = HashTexture(m_renderer, m_temp, TEX0, TEXA);
+		hash_computed = true;
+
+		auto it = m_src.m_cache.find(std::make_pair(TEX0.U64, hash));
+		if (it != m_src.m_cache.end())
+		{
+			src = it->second;
+			m_src.m_cache.erase(it);
+			src->m_cached_texture = false;
+			m_src.Add(src, TEX0, m_renderer->m_context->offset.tex);
+		}
+	}
+
 	Target* dst = NULL;
 	bool half_right = false;
 	int x_offset = 0;
@@ -488,7 +594,10 @@ GSTextureCache::Source* GSTextureCache::LookupSource(const GIFRegTEX0& TEX0, con
 		AttachPaletteToSource(src, psm_s.pal, true);
 	}
 
-	src->Update(r);
+	if (new_source && hash_computed && !(src->m_valid_hashes & 1u))
+		src->PreloadLevel(0, hash);
+	else
+		src->Update(r);
 
 	m_src.m_used = true;
 
@@ -880,7 +989,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
 
 				if (!s->m_target)
 				{
-					if (m_disable_partial_invalidation && s->m_repeating)
+					if (s->m_texture && s->m_valid_hashes & 1u)
+					{
+						m_src.RemoveAtAndCache(s);
+					}
+					else if (m_disable_partial_invalidation && s->m_repeating)
 					{
 						m_src.RemoveAt(s);
 					}
@@ -1808,6 +1921,7 @@ GSTextureCache::Surface::Surface(GSRenderer* r, u8* temp)
 	, m_temp(temp)
 	, m_32_bits_fmt(false)
 	, m_shared_texture(false)
+	, m_cached_texture(false)
 	, m_end_block(0)
 {
 	m_TEX0.TBP0 = 0x3fff;
@@ -2102,70 +2216,12 @@ void GSTextureCache::Source::Flush(u32 count, int layer)
 	m_write.count -= count;
 }
 
-using BlockHashState = XXH3_state_t;
-
-__fi static void BlockHashReset(BlockHashState& st)
-{
-	XXH3_64bits_reset(&st);
-}
-
-__fi static void BlockHashAccumulate(BlockHashState& st, const u8* bp)
-{
-	XXH3_64bits_update(&st, bp, BLOCK_SIZE);
-}
-
-__fi static void BlockHashAccumulate(BlockHashState& st, const u8* bp, u32 size)
-{
-	XXH3_64bits_update(&st, bp, size);
-}
-
-__fi static GSTextureCache::Source::HashType FinishBlockHash(BlockHashState& st)
-{
-	return XXH3_64bits_digest(&st);
-}
-
 void GSTextureCache::Source::PreloadLevel(int level)
 {
-	// m_TEX0 is adjusted for mips (messy, should be changed).
-	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_TEX0.PSM];
-	const GSVector2i& bs = psm.bs;
-	const int tw = 1 << m_TEX0.TW;
-	const int th = 1 << m_TEX0.TH;
-
-	// For textures which are smaller than the block size, we expand and then hash.
-	// This is because otherwise we get the padding bytes, which can be random junk.
-	if (tw < bs.x || th < bs.y)
-	{
-		PreloadSmallLevel(level);
+	if (m_complete_layers & (1u << level))
 		return;
-	}
 
-	// From GSLocalMemory foreachBlock(), used for reading textures.
-	// We want to hash the exact same blocks here.
-	const GSVector4i rect(0, 0, tw, th);
-	const GSVector4i block_rect(rect.ralign<Align_Outside>(bs));
-	const GSOffset& off = m_renderer->m_context->offset.tex;
-	GSLocalMemory& mem = m_renderer->m_mem;
-	HashType hash;
-	{
-		BlockHashState hash_st;
-		BlockHashReset(hash_st);
-
-		GSOffset::BNHelper bn = off.bnMulti(block_rect.left, block_rect.top);
-		const int right = block_rect.right >> off.blockShiftX();
-		const int bottom = block_rect.bottom >> off.blockShiftY();
-		const int xAdd = (1 << off.blockShiftX()) * (psm.bpp / 8);
-
-		for (; bn.blkY() < bottom; bn.nextBlockY())
-		{
-			for (int x = 0; bn.blkX() < right; bn.nextBlockX(), x += xAdd)
-			{
-				BlockHashAccumulate(hash_st, mem.BlockPtr(bn.value()));
-			}
-		}
-
-		hash = FinishBlockHash(hash_st);
-	}
+	HashType hash = HashTexture(m_renderer, m_temp, m_TEX0, m_TEXA);
 
 	// Layer is complete again, regardless of whether the hash matches or not (and we reupload).
 	const u8 layer_bit = static_cast<u8>(1) << level;
@@ -2175,8 +2231,25 @@ void GSTextureCache::Source::PreloadLevel(int level)
 	if ((m_valid_hashes & layer_bit) && m_layer_hash[level] == hash)
 		return;
 
+	PreloadLevel(level, hash);
+}
+
+void GSTextureCache::Source::PreloadLevel(int level, HashType hash)
+{
+	const u8 layer_bit = static_cast<u8>(1) << level;
 	m_valid_hashes |= layer_bit;
+	m_complete_layers |= layer_bit;
 	m_layer_hash[level] = hash;
+
+	//Console.WriteLn("Upload %ux%u hash %08X from %p", tw, th, hash, this);
+	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_TEX0.PSM];
+	const GSVector2i& bs = psm.bs;
+	const int tw = 1 << m_TEX0.TW;
+	const int th = 1 << m_TEX0.TH;
+	const GSVector4i rect(0, 0, tw, th);
+	const GSVector4i block_rect(rect.ralign<Align_Outside>(bs));
+	const GSOffset& off = m_renderer->m_context->offset.tex;
+	GSLocalMemory& mem = m_renderer->m_mem;
 
 	// Expand texture/apply palette.
 	const int read_width = std::max(tw, psm.bs.x);
@@ -2423,6 +2496,7 @@ void GSTextureCache::SourceMap::RemoveAll()
 		delete s;
 
 	m_surfaces.clear();
+	m_cache.clear();
 
 	for (FastList<Source*>& item : m_map)
 	{
@@ -2438,7 +2512,13 @@ void GSTextureCache::SourceMap::RemoveAt(Source* s)
 			 s->m_texture ? s->m_texture->GetID() : 0,
 			 s->m_TEX0.TBP0);
 
-	if (s->m_target)
+	if (s->m_cached_texture)
+	{
+		auto it = m_cache.find(std::make_pair(s->m_TEX0.U64, s->m_layer_hash[0]));
+		pxAssertRel(it != m_cache.end(), "cached texture in cache");
+		m_cache.erase(it);
+	}
+	else if (s->m_target)
 	{
 		const size_t page = s->m_TEX0.TBP0 >> 5;
 		m_map[page].EraseIndex(s->m_erase_it[page]);
@@ -2452,6 +2532,36 @@ void GSTextureCache::SourceMap::RemoveAt(Source* s)
 	}
 
 	delete s;
+}
+
+void GSTextureCache::SourceMap::RemoveAtAndCache(Source* s)
+{
+	GL_CACHE("TC: Cache Src Texture: %d (0x%x)",
+		s->m_texture ? s->m_texture->GetID() : 0,
+		s->m_TEX0.TBP0);
+
+	if (s->m_target)
+	{
+		const size_t page = s->m_TEX0.TBP0 >> 5;
+		m_map[page].EraseIndex(s->m_erase_it[page]);
+	}
+	else
+	{
+		s->m_pages.loopPages([this, s](u32 page) {
+			m_map[page].EraseIndex(s->m_erase_it[page]);
+		});
+	}
+
+	auto key = std::make_pair(s->m_TEX0.U64, s->m_layer_hash[0]);
+	auto it = m_cache.find(key);
+	if (it != m_cache.end())
+	{
+		//Console.WriteLn("Dupe in cache");
+		RemoveAt(it->second);
+	}
+
+	s->m_cached_texture = true;
+	m_cache.emplace(key, s);
 }
 
 void GSTextureCache::AttachPaletteToSource(Source* s, u16 pal, bool need_gs_texture)
